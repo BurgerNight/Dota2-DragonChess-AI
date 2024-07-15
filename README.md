@@ -15,6 +15,7 @@ pip install -r requirements.txt
 python run_agent.py
 ``` 
 3. Switch the screen back to Dota2.
+4. When finished, press ```Q``` or ```Esc``` to exit the program.
 
 ### Debug
 To check if the game board is identified correctly, run:
