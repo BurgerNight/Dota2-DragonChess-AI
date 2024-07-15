@@ -1,3 +1,5 @@
+keyboard==0.13.5
 numpy==1.19.5
-opencv_python==4.6.0.66
+opencv_python==4.5.3.56
+Pillow==10.4.0
 PyAutoGUI==0.9.54

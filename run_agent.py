@@ -8,38 +8,41 @@ import argparse
 import cv2
 import numpy as np
 import pyautogui
+import keyboard
+from PIL import ImageGrab
 
 
-def capture_screenshot(x=0, y=0, w=2560, h=1600, show=False):
-    screenshot = pyautogui.screenshot(region=(x, y, w, h))
-    screenshot_array = np.array(screenshot)
-    screenshot_array = cv2.cvtColor(screenshot_array, cv2.COLOR_RGB2BGR)
-    if show:
-        screenshot.show()
-    return screenshot_array
+def get_image_array(image):
+    image_array = np.array(image)
+    image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+    return image_array
 
 
 def locate_image_on_screen(target_image_path, confidence=0.8):
-    screenshot_array = capture_screenshot()
+    screenshot = pyautogui.screenshot()
+    image_array = get_image_array(screenshot)
     target_image = cv2.imread(target_image_path)
-    result = cv2.matchTemplate(screenshot_array, target_image, cv2.TM_CCOEFF_NORMED)
+
+    # Get screen resolution
+    screen_width, screen_height = ImageGrab.grab().size
+
+    # Resize target image based on screen resolution
+    target_width, target_height, _ = target_image.shape
+    resize_ratio = min(screen_width / 2560, screen_height / 1600)
+
+    if resize_ratio < 1:
+        target_image = cv2.resize(target_image, None, fx=resize_ratio, fy=resize_ratio, interpolation=cv2.INTER_AREA)
+
+    result = cv2.matchTemplate(image_array, target_image, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
 
     if max_val >= confidence:
         top_left = max_loc
         h, w, _ = target_image.shape
         bottom_right = (top_left[0] + w, top_left[1] + h)
-
         return top_left, bottom_right
     else:
-        raise Exception('game board not found on the screen.')
-
-
-def load_image_templates(image_paths):
-    image_templates = {}
-    for image_name, path in image_paths.items():
-        image_templates[image_name] = cv2.imread(path, cv2.IMREAD_COLOR)
-    return image_templates
+        return None
 
 
 def load_elem_images(directory):
@@ -58,24 +61,85 @@ def preprocess_image(image):
     return blurred_image
 
 
-def find_game_board(resource_dir, show=False):
+def find_game_board(resource_dir):
     '''
     Set show_board=True to check the board image
     Make sure the image shown is similar to board_sample.pgn
     '''
-    top_left_loc = locate_image_on_screen(os.path.join(resource_dir, 'topLeft.png'))
-    bottom_right_loc = locate_image_on_screen(os.path.join(resource_dir, 'botRight.png'))
+    top_left_loc = locate_image_on_screen(os.path.join(resource_dir, 'topLeft.jpg'))
+    bottom_right_loc = locate_image_on_screen(os.path.join(resource_dir, 'botRight.jpg'))
+
+    # Return None when board corner not found
+    if top_left_loc is None or bottom_right_loc is None:
+        return None, None
 
     get_middle = lambda x: (x[0][0] + (x[1][0] - x[0][0]) // 2, x[0][1] + (x[1][1] - x[0][1]) // 2)
     top_left = get_middle(top_left_loc)
     bottom_right = get_middle(bottom_right_loc)
 
+    x, y, w, h = top_left[0], top_left[1], bottom_right[0], bottom_right[1]
+
+    # Return None when board corner location is incorrectly identified
+    if w - x < 0 or h - y < 0:
+        return None, None
+
     print('board top left corner:', top_left)
     print('board bottom right corner:', bottom_right)
 
-    x, y, w, h = top_left[0], top_left[1], bottom_right[0], bottom_right[1]
-    capture_screenshot(x, y, w - x, h - y, show=show)
     return top_left, bottom_right
+
+
+class ElementMatcher:
+    def __init__(self, elem_images):
+        self._elem_images = elem_images
+
+    def find_best_match_element(self, grid):
+        best_match_score = float('inf')
+        best_match_elem = None
+
+        for elem_name, elem in self._elem_images.items():
+            hist_score = self.calculate_histogram_similarity(grid, elem)
+
+            # Choose the element with the smallest histogram score (closest match)
+            if hist_score < best_match_score:
+                best_match_score = hist_score
+                best_match_elem = elem_name
+
+        return best_match_elem, best_match_score
+
+    def calculate_histogram_similarity(self, grid, elem):
+        # Convert images to HSV space
+        hsv_grid = cv2.cvtColor(grid, cv2.COLOR_BGR2HSV)
+        hsv_template = cv2.cvtColor(elem, cv2.COLOR_BGR2HSV)
+
+        # Calculate histograms for each channel (Hue, Saturation, Value)
+        hist_grid_hue = cv2.calcHist([hsv_grid], [0], None, [256], [0, 256])
+        hist_grid_saturation = cv2.calcHist([hsv_grid], [1], None, [256], [0, 256])
+        hist_grid_value = cv2.calcHist([hsv_grid], [2], None, [256], [0, 256])
+
+        hist_template_hue = cv2.calcHist([hsv_template], [0], None, [256], [0, 256])
+        hist_template_saturation = cv2.calcHist([hsv_template], [1], None, [256], [0, 256])
+        hist_template_value = cv2.calcHist([hsv_template], [2], None, [256], [0, 256])
+
+        # Normalize histograms
+        cv2.normalize(hist_grid_hue, hist_grid_hue)
+        cv2.normalize(hist_grid_saturation, hist_grid_saturation)
+        cv2.normalize(hist_grid_value, hist_grid_value)
+
+        cv2.normalize(hist_template_hue, hist_template_hue)
+        cv2.normalize(hist_template_saturation, hist_template_saturation)
+        cv2.normalize(hist_template_value, hist_template_value)
+
+        # Calculate histogram comparison scores (using Bhattacharyya distance)
+        hist_score_hue = cv2.compareHist(hist_grid_hue, hist_template_hue, cv2.HISTCMP_BHATTACHARYYA)
+        hist_score_saturation = cv2.compareHist(hist_grid_saturation, hist_template_saturation,
+                                                cv2.HISTCMP_BHATTACHARYYA)
+        hist_score_value = cv2.compareHist(hist_grid_value, hist_template_value, cv2.HISTCMP_BHATTACHARYYA)
+
+        # Combine scores
+        hist_score = (hist_score_hue + hist_score_saturation + hist_score_value) / 3.0
+
+        return hist_score
 
 
 class MatchThreeAgent:
@@ -99,7 +163,7 @@ class MatchThreeAgent:
         13: [{(0, -2), (0, -1), (0, 0), (0, 1)}, {(0, -1), (0, 0), (0, 1), (0, 2)}],
     }
 
-    def __init__(self, top_left, bottom_right):
+    def __init__(self, top_left, bottom_right, elem_images):
         self.prev_elem_array = None
         self.elem_array = np.zeros((8, 8), dtype=np.int64)
         self.special_elem_array = np.zeros((8, 8), dtype=np.int64)
@@ -109,16 +173,19 @@ class MatchThreeAgent:
         self._top_left = top_left
         self._bottom_right = bottom_right
         self._scores = [1] * self.ROW_NUM * self.COL_NUM
+        # self._elem_images = elem_images
+        self._element_matcher = ElementMatcher(elem_images)
 
     def identify_game_board(self):
         x, y, w, h = self._top_left[0], self._top_left[1], self._bottom_right[0], self._bottom_right[1]
-        board_array = capture_screenshot(x, y, w - x, h - y)
+        board = pyautogui.screenshot(region=(x, y, w - x, h - y))
+        board_array = get_image_array(board)
         return board_array
 
     def split_board_into_grids(self, grid_array):
         height, width, _ = grid_array.shape
 
-        # initialize grid location on screen
+        # Initialize grid location on the screen
         if self._grid_height is None:
             self._grid_height = height // self.ROW_NUM
             self._grid_width = width // self.COL_NUM
@@ -126,45 +193,32 @@ class MatchThreeAgent:
                 for j in range(self.COL_NUM):
                     self._grid_location[(i, j)] = (self._top_left[0] + j * self._grid_width + self._grid_width / 2,
                                                    self._top_left[1] + i * self._grid_height + self._grid_height / 2)
+            # for elem_name, image in self._elem_images.items():
+            #     self._elem_images[elem_name] = cv2.resize(image, (self._grid_width, self._grid_height))  # unused
 
         grids = []
         for i in range(self.ROW_NUM):
             for j in range(self.COL_NUM):
-                grid = grid_array[i * self._grid_height:(i + 1) * self._grid_height,
-                       j * self._grid_width:(j + 1) * self._grid_width]
+                x_margin, y_margin = 0, 0
+                start_x, end_x = int(j * self._grid_width + x_margin), int((j + 1) * self._grid_width - x_margin)
+                start_y, end_y = int(i * self._grid_height + y_margin), int((i + 1) * self._grid_height - y_margin)
+                grid = grid_array[start_y:end_y, start_x:end_x]
                 grids.append(grid)
+
         return grids
 
-    def update_elements(self, grids, elem_images):
-        def find_best_match_element(grid, elem_images):
-            best_match_score = -1
-            best_match_elem = None
+    def find_best_match_element(self, grid):
+        best_match_elem, best_match_score = self._element_matcher.find_best_match_element(grid)
+        return best_match_elem, best_match_score
 
-            for elem_name, elem_image in elem_images.items():
-                match_scores = []
-                for channel in range(3):  # BGR channel
-                    result = cv2.matchTemplate(grid[:, :, channel], elem_image[:, :, channel], cv2.TM_CCOEFF_NORMED)
-                    _, max_val, _, _ = cv2.minMaxLoc(result)
-                    match_scores.append(max_val)
-
-                combined_score = np.mean(match_scores)
-                if combined_score > best_match_score:
-                    best_match_score = combined_score
-                    best_match_elem = elem_name
-
-                # early exit
-                if best_match_score > 0.9:
-                    break
-
-            return best_match_elem, best_match_score
-
-        with ThreadPoolExecutor() as executor:
-            results = list(executor.map(lambda cell: find_best_match_element(cell, elem_images), grids))
+    def update_elements(self, grids):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(self.find_best_match_element, grids))
 
         elem_array = np.zeros((8, 8), dtype=np.int64)
         special_elem_array = np.zeros((8, 8), dtype=np.int64)
 
-        # update element array
+        # Update element array
         self._scores = []
         for i, (elem_name, score) in enumerate(results):
             row, col = i // 8, i % 8
@@ -190,25 +244,22 @@ class MatchThreeAgent:
         return index1[0] - index2[0], index1[1] - index2[1]
 
     def get_action(self):
-        cur_grid_dict = {(i, j) for i in range(0, 8) for j in range(0, 8)}
-
         def equal_match_value(index1, index2):
-            return index1 in cur_grid_dict and index2 in cur_grid_dict \
-                and ar_match[index1] == ar_match[index2]
+            return index1 in cur_grid_lst and index2 in cur_grid_lst and ar_match[index1] == ar_match[index2]
 
         def index_could_swap(index):
-            return index in cur_grid_dict and ar_swap[index]
+            return index in cur_grid_lst and ar_swap[index]
 
+        cur_grid_lst = [(i, j) for i in range(0, self.ROW_NUM) for j in range(0, self.COL_NUM)]
         ar_swap = np.zeros((self.ROW_NUM, self.COL_NUM))
         ar_match = np.zeros((self.ROW_NUM, self.COL_NUM))
-        for index, grid in cur_grid_dict:
+        for index in cur_grid_lst:
             ar_swap[index] = self.elem_array[index]
             ar_match[index] = self.elem_array[index]
 
         action_set = set()
         for i, j in np.argwhere(ar_swap // 10 == 1):
-            if ar_swap[i, j] != 10:
-                action_set.add(((i, j), (i, j)))
+            action_set.add(((i, j), (i, j)))
             for index in [(i - 1, j), (i + 1, j), (i, j + 1), (i, j - 1)]:
                 if index_could_swap(index):
                     action_set.add(((i, j), index))
@@ -247,14 +298,14 @@ class MatchThreeAgent:
 
     def get_form_special_action(self, actions):
         indices = [index for indices in actions for index in indices]
-        candidate_indices = [k for k, v in Counter(indices).items() if v >= 2]
-        candidate_actions = [action for action in actions if
-                             action[0] in candidate_indices or
-                             action[1] in candidate_indices]
+        index_candidates = [k for k, v in Counter(indices).items() if v >= 2]
+        action_candidates = [action for action in actions if
+                             action[0] in index_candidates or
+                             action[1] in index_candidates]
 
         form_special_actions = []
 
-        for action in candidate_actions:
+        for action in action_candidates:
             for i in range(2):
                 valid_indices = {(0, 0)}
                 main_index, neighbor_index = action[i], action[1 - i]
@@ -282,16 +333,21 @@ class MatchThreeAgent:
             elem1, elem2 = self.elem_array[index1], self.elem_array[index2]
             neighbor_offset = [[-2, 0], [-1, 0], [1, 0], [2, 0], [0, -2], [0, -1], [0, 1], [0, 2]]
 
-            for offset in neighbor_offset:
-                neighbor_index1 = self.grid_index_add(index1, offset)
-                if neighbor_index1 != index2 and self.get_grid_element(neighbor_index1) and self.special_elem_array[
-                    neighbor_index1] == elem2:
+            index1_ignore = [2 * i for i in self.grid_index_subtract(index2, index1)]
+            index1_candidates = [offset for offset in neighbor_offset if offset not in [index2, index1_ignore]]
+
+            index2_ignore = [2 * i for i in self.grid_index_subtract(index1, index2)]
+            index2_candidates = [offset for offset in neighbor_offset if offset not in [index1, index2_ignore]]
+
+            for offset in index1_candidates:
+                neighbor_index = self.grid_index_add(index1, offset)
+                if self.get_grid_element(neighbor_index) and self.special_elem_array[neighbor_index] == elem2:
                     use_special_actions.append(action)
                     break
 
-                neighbor_index2 = self.grid_index_add(index2, offset)
-                if neighbor_index2 != index1 and self.get_grid_element(neighbor_index2) and self.special_elem_array[
-                    neighbor_index2] == elem1:
+            for offset in index2_candidates:
+                neighbor_index = self.grid_index_add(index2, offset)
+                if self.get_grid_element(neighbor_index) and self.special_elem_array[neighbor_index] == elem1:
                     use_special_actions.append(action)
                     break
 
@@ -304,15 +360,14 @@ class MatchThreeAgent:
             pyautogui.moveTo(index2[0], index2[1], duration=0.16)
             pyautogui.mouseUp()
 
-        if len(actions) == 0:
-            return []
         if len(form_actions) > 0:
             action = random.choice(form_actions)
         elif len(use_actions) > 0:
             action = random.choice(use_actions)
-        else:
+        elif len(actions) > 0:
             action = random.choice(actions)
-            # action = sorted(actions, reverse=True)[0]
+        else:
+            return []
 
         screen_index1, screen_index2 = self._grid_location[action[0]], self._grid_location[action[1]]
         swap_element(screen_index1, screen_index2)
@@ -330,78 +385,105 @@ def test_case():
     top_left = (185, 195)
     bottom_right = (1260, 1270)
 
-    agent = MatchThreeAgent(top_left, bottom_right)
-    x = np.array([[5,5,6,3,2,4,2,3],
-                  [5,2,5,4,6,2,5,5],
-                  [2,4,2,5,1,3,4,2],
-                  [1,5,3,1,2,1,2,3],
-                  [1,1,4,5,1,5,2,1],
-                  [4,2,6,2,1,4,5,3],
-                  [3,5,1,6,2,3,1,6],
-                  [4,6,3,5,3,2,3,5]])
+    agent = MatchThreeAgent(top_left, bottom_right, None)
+    x = np.array([[5, 5, 6, 3, 2, 4, 2, 3],
+                  [5, 2, 5, 4, 6, 2, 5, 5],
+                  [2, 4, 2, 5, 1, 3, 4, 2],
+                  [1, 5, 3, 1, 2, 1, 2, 3],
+                  [1, 1, 4, 5, 1, 5, 2, 1],
+                  [4, 2, 6, 2, 1, 4, 5, 3],
+                  [3, 5, 1, 6, 2, 3, 1, 6],
+                  [4, 6, 3, 5, 3, 2, 3, 5]])
 
-    y = np.array([[0,0,0,0,0,0,0,0],
-                  [0,0,0,0,0,0,0,0],
-                  [0,0,0,0,0,0,0,0],
-                  [0,0,0,0,0,0,0,0],
-                  [0,0,0,0,0,0,0,0],
-                  [0,0,0,0,1,0,0,0],
-                  [0,0,0,0,0,0,0,0],
-                  [0,0,0,0,0,0,0,0]])
+    y = np.array([[0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 1, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0],
+                  [0, 0, 0, 0, 0, 0, 0, 0]])
 
     agent.elem_array = x
     agent.special_elem_array = y
     action = agent.get_action()
     print(x)
-    print(action)
-    print(agent.get_form_special_action(action))
-    print(agent.get_use_special_action(action))
+    print('all_actions', action)
+    print('form_actions', agent.get_form_special_action(action))
+    print('use_actions', agent.get_use_special_action(action))
 
 
-def run(delay=5, show=False):
+def run(delay, show, board_coordinates):
+    print('Program will start in {} seconds, please go back to the game'.format(delay))
     time.sleep(delay)
 
-    resource_dir = os.path.join(os.getcwd(), 'resource')
+    cur_path = sys.argv[0]
+    cur_dir = os.path.dirname(cur_path)
+    resource_dir = os.path.join(cur_dir, 'resource')
 
-    # This finds the top left and bottom right coordinate of the game board.
-    # If this function doesn't work, you could set the board coordinate manually
-    top_left, bottom_right = find_game_board(resource_dir, show=show)
-    # top_left = (185, 195)
-    # bottom_right = (1260, 1270)
+    # Check if board coordinates is defined by arguments
+    if board_coordinates is not None:
+        print('Set board coordinates', board_coordinates)
+        assert len(board_coordinates) == 4, 'Need 4 indices to locate the board, (x1, y1, x2, y2)'
+
+        board_corners = [int(s) for s in board_coordinates]
+        top_left, bottom_right = board_corners[:2], board_corners[2:]
+    else:
+        # Identify the game board from the screen
+        while True:
+            top_left, bottom_right = find_game_board(resource_dir)
+            if top_left is None or bottom_right is None:
+                print('Cannot locate the game board, make sure the game is on the screen.')
+                time.sleep(5)
+            else:
+                break
+
+    if show:
+        x, y = top_left
+        w, h = bottom_right
+        board = pyautogui.screenshot(region=(x, y, w - x, h - y))
+        board.show()
 
     elem_images = load_elem_images(resource_dir)
-    agent = MatchThreeAgent(top_left, bottom_right)
+
+    agent = MatchThreeAgent(top_left, bottom_right, elem_images)
 
     while True:
+        if keyboard.is_pressed('Esc') or keyboard.is_pressed('q'):
+            sys.exit(0)
+
         t1 = time.time()
 
+        # Update elements on the board
         board_array = agent.identify_game_board()
         grids = agent.split_board_into_grids(board_array)
-        agent.update_elements(grids, elem_images)
+        agent.update_elements(grids)
         avg_confidence_score = agent.get_confidence_score()
 
-        print('element matching confidence:', avg_confidence_score)
-        if avg_confidence_score < 0.5:
-            print('game board is not found on the screen')
-            time.sleep(5)
+        # Take action when elements start to change
+        if agent.prev_elem_array is None or not np.array_equal(agent.prev_elem_array, agent.elem_array):
+            actions = agent.get_action()
+            form_actions = agent.get_form_special_action(actions)
+            use_actions = agent.get_use_special_action(actions)
+            action = agent.take_action(actions, form_actions, use_actions)
+
+            print(agent.prev_elem_array)
+            print(agent.elem_array)
+            print('action', action)
+            print('time cost', time.time() - t1)
+            print('=' * 50)
         else:
-            if agent.prev_elem_array is None or not np.array_equal(agent.prev_elem_array, agent.elem_array):
-                actions = agent.get_action()
-                form_actions = agent.get_form_special_action(actions)
-                use_actions = agent.get_use_special_action(actions)
-                action = agent.take_action(actions, form_actions, use_actions)
+            time.sleep(1)
 
-                print(agent.elem_array)
-                print('action', action)
-                print('time cost', time.time() - t1)
 
-        print('=' * 50)
-
+q
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--delay', type=int, default=5, help='delay before start in seconds')
-    parser.add_argument('-s', '--show', help='whether show game board when start', action="store_true")
+    parser.add_argument('-d', '--delay', type=int, default=10, help='Delay before running in seconds')
+    parser.add_argument('-s', '--show_board', help='Show game board during runtime', action="store_true")
+    parser.add_argument('-b', '--board_coordinates', nargs='+',
+                        help='Define board coordinates (x1, y1, x2, y2) for the top-left and bottom-right corners')
     args = parser.parse_args()
 
-    run(delay=args.delay, show=args.show)
+    run(delay=args.delay, show=args.show_board, board_coordinates=args.board_coordinates)
