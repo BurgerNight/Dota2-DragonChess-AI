@@ -5,7 +5,7 @@ This is an AI for the match-3 minigame embedded in Dota2 Crownfall Act 3. It use
 It will help you beat the game.
 
 ### Download
-[here](https://github.com/BurgerNight/Dota2-DragonChess-AI/releases)
+[Here](https://github.com/BurgerNight/Dota2-DragonChess-AI/releases)
 
 ### Usage
 
@@ -45,4 +45,5 @@ You can take a screenshot and paste it to Windows paint to find out the coordina
 These problems occur when the game board is not correctly identified. Try changing game resolution or use `--board_coordinates` above to manually set up board coordinates.
 
 2. Will it get you VAC banned?
-The program functions based on image recognition. It does not access or modify any game files. It should be safe to use.
+
+The program functions based on image recognition. It does not access or modify any game files and should be safe to use.
