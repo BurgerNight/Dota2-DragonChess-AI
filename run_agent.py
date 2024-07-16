@@ -2,7 +2,7 @@ import os
 import sys
 import random
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import argparse
 import cv2
@@ -18,20 +18,27 @@ def get_image_array(image):
     return image_array
 
 
+def resize_image_by_resolution(image):
+    # Get screen resolution
+    screen_width, screen_height = ImageGrab.grab().size
+    image_width, image_height, _ = image.shape
+    original_width, original_height = 2560, 1600
+
+    # Resize target image based on screen resolution
+    image_height, image_width, _ = image.shape
+    width_ratio = screen_width / original_width
+    height_ratio = screen_height / original_height
+    resize_ratio = min(width_ratio, height_ratio)
+
+    image_resized = cv2.resize(image, (int(image_width * resize_ratio), int(image_height * resize_ratio)), interpolation=cv2.INTER_AREA)
+    return image_resized
+
+
 def locate_image_on_screen(target_image_path, confidence=0.8):
     screenshot = pyautogui.screenshot()
     image_array = get_image_array(screenshot)
     target_image = cv2.imread(target_image_path)
-
-    # Get screen resolution
-    screen_width, screen_height = ImageGrab.grab().size
-
-    # Resize target image based on screen resolution
-    target_width, target_height, _ = target_image.shape
-    resize_ratio = min(screen_width / 2560, screen_height / 1600)
-
-    if resize_ratio < 1:
-        target_image = cv2.resize(target_image, None, fx=resize_ratio, fy=resize_ratio, interpolation=cv2.INTER_AREA)
+    target_image = resize_image_by_resolution(target_image)
 
     result = cv2.matchTemplate(image_array, target_image, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
@@ -51,7 +58,9 @@ def load_elem_images(directory):
         if filename[0].isdigit():
             image_path = os.path.join(directory, filename)
             elem_name = filename.split('.')[0]
-            elem_images[elem_name] = cv2.imread(image_path, cv2.IMREAD_COLOR)
+            elem_image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+            elem_image = resize_image_by_resolution(elem_image)
+            elem_images[elem_name] = elem_image
     return elem_images
 
 
@@ -304,6 +313,7 @@ class MatchThreeAgent:
                              action[1] in index_candidates]
 
         form_special_actions = []
+        form_type = defaultdict(list)
 
         for action in action_candidates:
             for i in range(2):
@@ -317,11 +327,13 @@ class MatchThreeAgent:
                             grid_index = self.grid_index_add(main_index, offset)
                             if grid_index != neighbor_index and grid_element == neighbor_grid_element:
                                 valid_indices.add(self.grid_index_subtract(grid_index, main_index))
-                for number, all_index_list in self.MATCH_CONFIG_DICT.items():
+                for num, all_index_list in self.MATCH_CONFIG_DICT.items():
                     for index_set in all_index_list:
                         if valid_indices.intersection(index_set) == index_set:
-                            if action not in form_special_actions:
-                                form_special_actions.append(action)
+                            form_type[num].append(action)
+
+        for num in sorted(form_type):
+            form_special_actions += form_type[num]
 
         return form_special_actions
 
@@ -369,6 +381,7 @@ class MatchThreeAgent:
         else:
             return []
 
+        print(self._grid_location.keys())
         screen_index1, screen_index2 = self._grid_location[action[0]], self._grid_location[action[1]]
         swap_element(screen_index1, screen_index2)
 
@@ -413,7 +426,7 @@ def test_case():
     print('use_actions', agent.get_use_special_action(action))
 
 
-def run(delay, show, board_coordinates):
+def run(delay, fast, show, board_coordinates):
     print('Program will start in {} seconds, please go back to the game'.format(delay))
     time.sleep(delay)
 
@@ -461,7 +474,7 @@ def run(delay, show, board_coordinates):
         avg_confidence_score = agent.get_confidence_score()
 
         # Take action when elements start to change
-        if agent.prev_elem_array is None or not np.array_equal(agent.prev_elem_array, agent.elem_array):
+        if fast or agent.prev_elem_array is None or np.array_equal(agent.prev_elem_array, agent.elem_array):
             actions = agent.get_action()
             form_actions = agent.get_form_special_action(actions)
             use_actions = agent.get_use_special_action(actions)
@@ -472,18 +485,21 @@ def run(delay, show, board_coordinates):
             print('action', action)
             print('time cost', time.time() - t1)
             print('=' * 50)
-        else:
-            time.sleep(1)
 
-
-q
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--delay', type=int, default=10, help='Delay before running in seconds')
+    parser.add_argument('-f', '--fast', help='Fact action, Do not wait for a static board', action="store_true")
     parser.add_argument('-s', '--show_board', help='Show game board during runtime', action="store_true")
     parser.add_argument('-b', '--board_coordinates', nargs='+',
                         help='Define board coordinates (x1, y1, x2, y2) for the top-left and bottom-right corners')
     args = parser.parse_args()
 
-    run(delay=args.delay, show=args.show_board, board_coordinates=args.board_coordinates)
+    # test_case()
+    try:
+        run(delay=args.delay, fast=args.fast, show=args.show_board, board_coordinates=args.board_coordinates)
+    except Exception as e:
+        print('An error occurred: {}'.format(e))
+        time.sleep(5)
+        raise
