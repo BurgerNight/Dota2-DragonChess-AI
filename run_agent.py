@@ -381,7 +381,6 @@ class MatchThreeAgent:
         else:
             return []
 
-        print(self._grid_location.keys())
         screen_index1, screen_index2 = self._grid_location[action[0]], self._grid_location[action[1]]
         swap_element(screen_index1, screen_index2)
 
