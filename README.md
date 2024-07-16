@@ -4,6 +4,9 @@ This is an AI for the match-3 minigame embedded in Dota2 Crownfall Act 3. It use
 
 It will help you beat the game.
 
+### Download
+[here](https://github.com/BurgerNight/Dota2-DragonChess-AI/releases)
+
 ### Usage
 
 1. Start the DragonChess game in Dota2.
