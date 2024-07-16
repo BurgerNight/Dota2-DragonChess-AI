@@ -40,3 +40,6 @@ You can take a screenshot and paste it to Windows paint to find out the coordina
 * The program raises an error and exits.
 
 These problems occur when the game board is not correctly identified. Try changing game resolution or use `--board_coordinates` above to manually set up board coordinates.
+
+2. Will it get you VAC banned?
+The program functions based on image recognition. It does not access or modify any game files. It should be safe to use.
