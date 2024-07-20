@@ -9,18 +9,16 @@ It will help you beat the game.
 
 ### Usage
 
-1. Start the DragonChess game in Dota2.
-2. Run `run_agent.exe`
-3. Switch the screen back to Dota2.
-4. When finished, press ```Q``` or ```Esc``` to exit the program.
+1. Go to the DragonChess game page.
+2. Run `run_agent.exe` run as administrator.
+3. Press `Play` on game page, then press `b` at the same time.
+4. Watch it play.
+5. Use `q` to pause/unpause the program, use `esc` to exit the program.
 
 
 
 ### Supported Arguments
-
-`--delay` or `-d` (default: 10), The delay in seconds before the program starts running.
-
-`--fast` or `f`, if set, it will not wait for a static board to perform the next action.
+`--wait_static` or `-w`, if set, it will wait for a static board to perform the next action.
 
 `--show` or `-s`, if set, it will display the identified game board image, use this for debugging.
 

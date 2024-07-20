@@ -8,8 +8,28 @@ import argparse
 import cv2
 import numpy as np
 import pyautogui
-import keyboard
+from pynput.keyboard import Listener, Key
 from PIL import ImageGrab
+
+
+start_agent = False
+stop_agent = False
+pause_agent = False
+
+
+def on_press(key):
+    global start_agent
+    global stop_agent
+    global pause_agent
+    try:
+        if key.char == 'b':
+            start_agent = True
+        elif key.char == 'p':
+            pause_agent = not pause_agent
+    except AttributeError:
+        if key == Key.esc:
+            stop_agent = True
+            # return False
 
 
 def get_image_array(image):
@@ -38,7 +58,7 @@ def locate_image_on_screen(target_image_path, confidence=0.8):
     screenshot = pyautogui.screenshot()
     image_array = get_image_array(screenshot)
     target_image = cv2.imread(target_image_path)
-    target_image = resize_image_by_resolution(target_image)
+    # target_image = resize_image_by_resolution(target_image)
 
     result = cv2.matchTemplate(image_array, target_image, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
@@ -425,9 +445,12 @@ def test_case():
     print('use_actions', agent.get_use_special_action(action))
 
 
-def run(delay, fast, show, board_coordinates):
-    print('Program will start in {} seconds, please go back to the game'.format(delay))
-    time.sleep(delay)
+def run(wait_static, show, board_coordinates):
+    global start_agent
+    global stop_agent
+
+    while not start_agent:
+        time.sleep(1)
 
     cur_path = sys.argv[0]
     cur_dir = os.path.dirname(cur_path)
@@ -457,12 +480,16 @@ def run(delay, fast, show, board_coordinates):
         board.show()
 
     elem_images = load_elem_images(resource_dir)
-
     agent = MatchThreeAgent(top_left, bottom_right, elem_images)
 
     while True:
-        if keyboard.is_pressed('Esc') or keyboard.is_pressed('q'):
-            sys.exit(0)
+        if stop_agent:
+            print("Program stopped by user.")
+            break
+        if pause_agent:
+            print("Program paused by user. Press 'p again to unpause.'")
+            time.sleep(1)
+            continue
 
         t1 = time.time()
 
@@ -473,13 +500,12 @@ def run(delay, fast, show, board_coordinates):
         avg_confidence_score = agent.get_confidence_score()
 
         # Take action when elements start to change
-        if fast or agent.prev_elem_array is None or np.array_equal(agent.prev_elem_array, agent.elem_array):
+        if not wait_static or agent.prev_elem_array is None or np.array_equal(agent.prev_elem_array, agent.elem_array):
             actions = agent.get_action()
             form_actions = agent.get_form_special_action(actions)
             use_actions = agent.get_use_special_action(actions)
             action = agent.take_action(actions, form_actions, use_actions)
 
-            print(agent.prev_elem_array)
             print(agent.elem_array)
             print('action', action)
             print('time cost', time.time() - t1)
@@ -488,16 +514,21 @@ def run(delay, fast, show, board_coordinates):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--delay', type=int, default=10, help='Delay before running in seconds')
-    parser.add_argument('-f', '--fast', help='Fact action, Do not wait for a static board', action="store_true")
+    parser.add_argument('-w', '--wait_static', help='slow action, wait for a static board', action="store_true")
     parser.add_argument('-s', '--show_board', help='Show game board during runtime', action="store_true")
     parser.add_argument('-b', '--board_coordinates', nargs='+',
                         help='Define board coordinates (x1, y1, x2, y2) for the top-left and bottom-right corners')
     args = parser.parse_args()
 
     # test_case()
+
+    print("Please click play button and press 'b' to start.")
+
+    listener = Listener(on_press=on_press)
+    listener.start()
+
     try:
-        run(delay=args.delay, fast=args.fast, show=args.show_board, board_coordinates=args.board_coordinates)
+        run(wait_static=args.wait_static, show=args.show_board, board_coordinates=args.board_coordinates)
     except Exception as e:
         print('An error occurred: {}'.format(e))
         time.sleep(5)
