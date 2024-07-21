@@ -11,7 +11,7 @@ It will help you beat the game.
 
 1. Go to the DragonChess game page.
 2. Run `run_agent.exe` run as administrator.
-3. Press `Play` on game page, then press `b` at the same time.
+3. Move the mouse over `Play` on game page, then press `b` to start.
 4. Watch it play.
 5. Use `q` to pause/unpause the program, use `esc` to exit the program.
 

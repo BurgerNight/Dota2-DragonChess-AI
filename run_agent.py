@@ -27,7 +27,7 @@ def on_press(key):
         elif key.char == 'p':
             pause_agent = not pause_agent
     except AttributeError:
-        if key == Key.esc:
+        if start_agent and key == Key.esc:
             stop_agent = True
             # return False
 
@@ -58,7 +58,7 @@ def locate_image_on_screen(target_image_path, confidence=0.8):
     screenshot = pyautogui.screenshot()
     image_array = get_image_array(screenshot)
     target_image = cv2.imread(target_image_path)
-    # target_image = resize_image_by_resolution(target_image)
+    target_image = resize_image_by_resolution(target_image)
 
     result = cv2.matchTemplate(image_array, target_image, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
@@ -451,6 +451,8 @@ def run(wait_static, show, board_coordinates):
 
     while not start_agent:
         time.sleep(1)
+    pyautogui.click(interval=0.5)
+    time.sleep(4)
 
     cur_path = sys.argv[0]
     cur_dir = os.path.dirname(cur_path)
@@ -522,7 +524,7 @@ if __name__ == "__main__":
 
     # test_case()
 
-    print("Please click play button and press 'b' to start.")
+    print("Move the mouse over 'play' button and press 'b' to start.")
 
     listener = Listener(on_press=on_press)
     listener.start()
